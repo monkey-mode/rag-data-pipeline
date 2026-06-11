@@ -12,5 +12,8 @@ __pycache__/
 # Local data stores
 chroma_db/
 
+# Claude Code local settings
+.claude/
+
 # OS
 .DS_Store

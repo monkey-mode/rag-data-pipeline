@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Pipeline</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --ink: #1f2421;
+    --muted: #6f7a72;
+    --line: #e3dfd5;
+    --accent: #1f6f54;
+    --accent-soft: #e7f2ec;
+    --amber: #b97f10;
+    --amber-soft: #fdf3df;
+    --blue: #2563ad;
+    --blue-soft: #e6eef8;
+    --red: #b3422f;
+    --red-soft: #faeae6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Avenir Next", "Seravek", "Trebuchet MS", Verdana, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: 0.2px; }
+  header span { color: var(--muted); font-size: 13px; }
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    min-height: 0;
+  }
+
+  /* ---- documents panel ---- */
+  #docs-panel {
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #docs-panel h2, #chat-panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--muted);
+    margin: 0;
+    padding: 14px 18px 8px;
+  }
+  #drop {
+    margin: 8px 16px;
+    border: 1.5px dashed var(--line);
+    border-radius: 10px;
+    padding: 18px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  #drop.dragover, #drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+  #file-input { display: none; }
+  #doc-list { overflow-y: auto; flex: 1; padding: 4px 8px 16px; }
+  .doc {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-size: 13.5px;
+  }
+  .doc:hover { background: var(--bg); }
+  .doc .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc .chunks { color: var(--muted); font-size: 12px; }
+  .badge {
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .badge.uploading  { background: var(--amber-soft); color: var(--amber); }
+  .badge.queued     { background: var(--amber-soft); color: var(--amber); }
+  .badge.processing { background: var(--blue-soft);  color: var(--blue); }
+  .badge.ready      { background: var(--accent-soft); color: var(--accent); }
+  .badge.failed     { background: var(--red-soft);   color: var(--red); }
+  .doc .actions { display: none; gap: 2px; }
+  .doc:hover .actions { display: inline-flex; }
+  .doc .actions button {
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 5px;
+    border-radius: 5px;
+    color: var(--muted);
+  }
+  .doc .actions button:hover { background: var(--line); color: var(--ink); }
+  .doc .actions button.danger:hover { background: var(--red-soft); color: var(--red); }
+
+  /* ---- chat panel ---- */
+  #chat-panel { display: flex; flex-direction: column; min-height: 0; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px 24px; }
+  .msg { max-width: 760px; margin: 0 auto 14px; }
+  .msg .who {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .msg .bubble {
+    padding: 12px 16px;
+    border-radius: 10px;
+    line-height: 1.55;
+    font-size: 14.5px;
+    white-space: pre-wrap;
+  }
+  .msg.user .bubble { background: var(--accent); color: #fff; }
+  .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--line); }
+  .msg.error .bubble { background: var(--red-soft); color: var(--red); border: 1px solid var(--red); }
+  details.sources { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+  details.sources summary { cursor: pointer; user-select: none; }
+  .source {
+    border-left: 3px solid var(--line);
+    margin: 8px 0;
+    padding: 4px 10px;
+  }
+  .source .meta { font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+  .source .text { white-space: pre-wrap; }
+
+  #composer {
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    padding: 14px 24px;
+  }
+  #composer form {
+    max-width: 760px;
+    margin: 0 auto;
+    display: flex;
+    gap: 10px;
+  }
+  #question {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 14px;
+    font: inherit;
+    font-size: 14.5px;
+    outline: none;
+  }
+  #question:focus { border-color: var(--accent); }
+  #send {
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    padding: 0 22px;
+    cursor: pointer;
+  }
+  #send:disabled { opacity: .5; cursor: wait; }
+  .thinking { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RAG Pipeline</h1>
+  <span>upload &rarr; chunk &rarr; embed &rarr; ask</span>
+</header>
+<main>
+  <section id="docs-panel">
+    <h2>Documents</h2>
+    <div id="drop">drop a file here or click to upload<br><small>.txt .md .pdf .html</small></div>
+    <input type="file" id="file-input" accept=".txt,.md,.pdf,.html,.htm">
+    <div id="doc-list"></div>
+  </section>
+
+  <section id="chat-panel">
+    <h2>Chat</h2>
+    <div id="messages"></div>
+    <div id="composer">
+      <form id="ask-form">
+        <input id="question" placeholder="Ask something about your documents&hellip;" autocomplete="off">
+        <button id="send" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+</main>
+
+<script>
+const DOCS_API = "http://localhost:8001";
+const CHATS_API = "http://localhost:8002";
+
+/* ---------- documents: presign -> direct PUT to MinIO -> poll status ---------- */
+
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("file-input");
+const docList = document.getElementById("doc-list");
+
+drop.addEventListener("click", () => fileInput.click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  drop.classList.remove("dragover");
+  if (e.dataTransfer.files.length) upload(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", () => {
+  if (fileInput.files.length) upload(fileInput.files[0]);
+  fileInput.value = "";
+});
+
+async function upload(file) {
+  try {
+    // 1. ask the documents service for an upload slot
+    const res = await fetch(`${DOCS_API}/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name }),
+    });
+    if (!res.ok) throw new Error(`presign failed: ${res.status}`);
+    const doc = await res.json();
+
+    await refreshDocs();
+
+    // 2. PUT the bytes straight to MinIO — they never touch our API
+    const put = await fetch(doc.upload_url, { method: "PUT", body: file });
+    if (!put.ok) throw new Error(`upload failed: ${put.status}`);
+  } catch (err) {
+    alert(err.message);
+  }
+  refreshDocs();
+}
+
+function badge(status) {
+  return `<span class="badge ${status}">${status}</span>`;
+}
+
+async function refreshDocs() {
+  try {
+    const res = await fetch(`${DOCS_API}/documents`);
+    const docs = await res.json();
+    docList.innerHTML = docs.map((d) => `
+      <div class="doc" title="${d.error ?? ""}">
+        <span class="name">${d.filename}</span>
+        <span class="chunks">${d.chunk_count != null ? d.chunk_count + " chunks" : ""}</span>
+        ${badge(d.status)}
+        <span class="actions">
+          <button title="download original" onclick="downloadDoc('${d.id}')">&#8595;</button>
+          <button title="reprocess (re-chunk + re-embed)" onclick="reprocessDoc('${d.id}')">&#8635;</button>
+          <button title="delete everywhere" class="danger" onclick="deleteDoc('${d.id}', '${d.filename}')">&#10005;</button>
+        </span>
+      </div>
+    `).join("");
+  } catch {
+    docList.innerHTML = `<div class="doc"><span class="name thinking">documents service unreachable</span></div>`;
+  }
+}
+
+async function downloadDoc(id) {
+  const res = await fetch(`${DOCS_API}/documents/${id}/download`);
+  if (!res.ok) return alert(`download failed: ${res.status}`);
+  const { download_url } = await res.json();
+  window.open(download_url, "_blank");
+}
+
+async function reprocessDoc(id) {
+  const res = await fetch(`${DOCS_API}/documents/${id}/reprocess`, { method: "POST" });
+  if (!res.ok) alert(`reprocess failed: ${res.status}`);
+  refreshDocs();
+}
+
+async function deleteDoc(id, filename) {
+  if (!confirm(`Delete "${filename}" everywhere (file, chunks, record)?`)) return;
+  const res = await fetch(`${DOCS_API}/documents/${id}`, { method: "DELETE" });
+  if (!res.ok) alert(`delete failed: ${res.status}`);
+  refreshDocs();
+}
+
+refreshDocs();
+setInterval(refreshDocs, 3000); // statuses move uploading -> processing -> ready
+
+/* ---------- chat ---------- */
+
+const messages = document.getElementById("messages");
+const form = document.getElementById("ask-form");
+const questionInput = document.getElementById("question");
+const sendBtn = document.getElementById("send");
+
+function addMessage(kind, who, html) {
+  const el = document.createElement("div");
+  el.className = `msg ${kind}`;
+  el.innerHTML = `<div class="who">${who}</div><div class="bubble">${html}</div>`;
+  messages.appendChild(el);
+  messages.scrollTop = messages.scrollHeight;
+  return el;
+}
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = questionInput.value.trim();
+  if (!question) return;
+  questionInput.value = "";
+  sendBtn.disabled = true;
+
+  addMessage("user", "you", esc(question));
+  const pending = addMessage("assistant", "assistant", `<span class="thinking">retrieving &amp; thinking&hellip;</span>`);
+
+  try {
+    const res = await fetch(`${CHATS_API}/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, n_results: 4 }),
+    });
+    if (!res.ok) throw new Error(`chats service error: ${res.status}`);
+    const data = await res.json();
+
+    const sources = data.sources.map((s) => `
+      <div class="source">
+        <div class="meta">${esc(s.source)} &middot; chunk ${s.chunk_index} &middot; distance ${s.distance.toFixed(3)}</div>
+        <div class="text">${esc(s.text)}</div>
+      </div>
+    `).join("");
+
+    pending.querySelector(".bubble").innerHTML = esc(data.answer);
+    pending.insertAdjacentHTML("beforeend", `
+      <details class="sources">
+        <summary>${data.sources.length} source chunk${data.sources.length === 1 ? "" : "s"}</summary>
+        ${sources}
+      </details>
+    `);
+  } catch (err) {
+    pending.className = "msg error";
+    pending.querySelector(".bubble").textContent = err.message;
+  } finally {
+    sendBtn.disabled = false;
+    questionInput.focus();
+  }
+});
+</script>
+</body>
+</html>

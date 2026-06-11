@@ -1,0 +1,2 @@
+chromadb>=0.5
+langchain-text-splitters>=0.3

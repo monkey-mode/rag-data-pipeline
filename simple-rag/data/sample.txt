@@ -1,0 +1,26 @@
+Retrieval-Augmented Generation (RAG) is a technique that combines a large
+language model with an external knowledge base. Instead of relying only on
+what the model learned during training, RAG retrieves relevant documents at
+query time and passes them to the model as context. This grounds the model's
+answers in real data and reduces hallucination.
+
+A typical RAG pipeline has two phases. The ingestion phase reads raw
+documents, splits them into smaller chunks, converts each chunk into a
+vector embedding, and stores the embeddings in a vector database such as
+ChromaDB. The retrieval phase takes a user question, embeds it with the same
+embedding model, finds the most similar chunks in the vector database, and
+feeds those chunks to the language model to generate an answer.
+
+Chunking matters because embedding models and language models both have
+limited context. Chunks that are too large dilute the meaning of the
+embedding and waste context tokens; chunks that are too small lose the
+surrounding context needed to understand them. A common starting point is a
+few hundred characters per chunk with a small overlap between consecutive
+chunks, so that sentences cut at a boundary still appear intact in at least
+one chunk.
+
+MinIO is an S3-compatible object store often used to hold the raw uploaded
+files in a RAG system. Keeping the original file in object storage means the
+pipeline can always re-chunk and re-embed documents later — for example when
+switching to a better embedding model — without asking users to upload their
+files again. The vector database only ever holds derived data.

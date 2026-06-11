@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python ingest.py)",
+      "Bash(.venv/bin/python ingest.py --query \"Why does chunk size matter in RAG?\")"
+    ]
+  }
+}

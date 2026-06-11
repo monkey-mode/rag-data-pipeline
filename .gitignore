@@ -1,0 +1,16 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Environment / secrets
+.env
+.env.*
+
+# Local data stores
+chroma_db/
+
+# OS
+.DS_Store

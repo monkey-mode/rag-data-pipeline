@@ -1,0 +1,60 @@
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # S3 API (presigned uploads go here)
+      - "9001:9001" # web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Publish bucket events to a Redis list — the RAG worker consumes it as a queue.
+      MINIO_NOTIFY_REDIS_ENABLE_PRIMARY: "on"
+      MINIO_NOTIFY_REDIS_ADDRESS_PRIMARY: "redis:6379"
+      MINIO_NOTIFY_REDIS_KEY_PRIMARY: "minio:events"
+      MINIO_NOTIFY_REDIS_FORMAT_PRIMARY: "access"
+    depends_on:
+      - redis
+    volumes:
+      - minio_data:/data
+
+  # One-shot: create the documents bucket and attach the put-event rule to it.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb --ignore-existing local/documents;
+      mc event add local/documents arn:minio:sqs::PRIMARY:redis --event put || true;
+      mc event ls local/documents arn:minio:sqs::PRIMARY:redis;
+      "
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  chromadb:
+    image: chromadb/chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/data
+
+volumes:
+  minio_data:
+  postgres_data:
+  chroma_data:

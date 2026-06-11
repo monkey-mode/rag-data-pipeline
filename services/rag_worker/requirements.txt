@@ -1,0 +1,8 @@
+redis>=5.0
+psycopg[binary]>=3.2
+minio>=7.2
+chromadb>=0.5
+langchain-community>=0.3
+langchain-text-splitters>=0.3
+pypdf>=5.0
+unstructured>=0.16

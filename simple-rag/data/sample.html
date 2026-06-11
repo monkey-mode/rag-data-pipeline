@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Vector Databases Explained</title>
+  <style>body { font-family: sans-serif; }</style>
+  <script>console.log("this should never appear in extracted text");</script>
+</head>
+<body>
+  <h1>Vector Databases Explained</h1>
+  <p>
+    A vector database stores high-dimensional embedding vectors and answers
+    nearest-neighbor queries efficiently. ChromaDB is a popular open-source
+    vector database that runs embedded in a Python process or as a standalone
+    server, making it a good fit for local development and prototyping.
+  </p>
+  <h2>Similarity search</h2>
+  <p>
+    When a query arrives, the database embeds it and compares the query vector
+    against stored vectors using a distance metric such as cosine distance or
+    squared L2. The chunks with the smallest distance are the most semantically
+    similar, even when they share no exact keywords with the query.
+  </p>
+  <h2>Metadata filtering</h2>
+  <p>
+    Production systems usually attach metadata to each chunk, such as the
+    source filename, page number, or tenant identifier. Filtering on metadata
+    before or alongside the similarity search lets one collection serve many
+    documents and many users safely.
+  </p>
+</body>
+</html>

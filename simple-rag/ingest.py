@@ -1,7 +1,7 @@
-"""Simple RAG ingestion: read files from data/, chunk with LangChain, store in ChromaDB.
+"""Simple RAG ingestion: load files from data/ with LangChain, chunk, store in ChromaDB.
 
 Usage:
-    python ingest.py                      # ingest all .txt/.md files in data/
+    python ingest.py                      # ingest all supported files in data/
     python ingest.py --query "question"   # test retrieval against the stored chunks
 """
 
@@ -9,6 +9,12 @@ import argparse
 from pathlib import Path
 
 import chromadb
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    TextLoader,
+    UnstructuredHTMLLoader,
+)
+from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 BASE_DIR = Path(__file__).parent
@@ -19,20 +25,33 @@ COLLECTION_NAME = "documents"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
+LOADERS = {
+    ".txt": TextLoader,
+    ".md": TextLoader,
+    ".pdf": PyPDFLoader,
+    ".html": UnstructuredHTMLLoader,
+    ".htm": UnstructuredHTMLLoader,
+}
 
-def read_documents(data_dir: Path) -> list[tuple[str, str]]:
-    """Read all .txt and .md files from the data directory."""
-    files = sorted(p for p in data_dir.iterdir() if p.suffix in {".txt", ".md"})
-    return [(p.name, p.read_text(encoding="utf-8")) for p in files]
+
+def load_documents(data_dir: Path) -> list[Document]:
+    """Load all supported files as LangChain Documents (one or more per file)."""
+    documents = []
+    for path in sorted(data_dir.iterdir()):
+        loader_cls = LOADERS.get(path.suffix.lower())
+        if loader_cls is None:
+            continue
+        documents.extend(loader_cls(str(path)).load())
+    return documents
 
 
-def chunk_text(text: str) -> list[str]:
-    """Split text into overlapping chunks."""
+def split_documents(documents: list[Document]) -> list[Document]:
+    """Split Documents into overlapping chunks, preserving metadata."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
     )
-    return splitter.split_text(text)
+    return splitter.split_documents(documents)
 
 
 def get_collection() -> chromadb.Collection:
@@ -42,21 +61,35 @@ def get_collection() -> chromadb.Collection:
 
 
 def ingest() -> None:
-    collection = get_collection()
-    documents = read_documents(DATA_DIR)
+    documents = load_documents(DATA_DIR)
     if not documents:
-        print(f"No .txt/.md files found in {DATA_DIR}")
+        print(f"No supported files ({', '.join(sorted(LOADERS))}) found in {DATA_DIR}")
         return
 
-    for filename, text in documents:
-        chunks = chunk_text(text)
-        collection.upsert(
-            ids=[f"{filename}:{i}" for i in range(len(chunks))],
-            documents=chunks,
-            metadatas=[{"source": filename, "chunk_index": i} for i in range(len(chunks))],
-        )
-        print(f"Ingested {filename}: {len(chunks)} chunks")
+    chunks = split_documents(documents)
 
+    ids, texts, metadatas = [], [], []
+    chunks_per_file: dict[str, int] = {}
+    for chunk in chunks:
+        source = Path(chunk.metadata["source"]).name
+        index = chunks_per_file.get(source, 0)
+        chunks_per_file[source] = index + 1
+
+        ids.append(f"{source}:{index}")
+        texts.append(chunk.page_content)
+        metadata = {"source": source, "chunk_index": index}
+        if "page" in chunk.metadata:  # PyPDFLoader yields one Document per page
+            metadata["page"] = chunk.metadata["page"]
+        metadatas.append(metadata)
+        print(f"Prepared chunk {ids[-1]} (source: {source}, length: {len(texts[-1])} chars)")
+        print(f" Metadata: {metadata}")
+        print("-" * 60)
+
+    collection = get_collection()
+    collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
+
+    for source, count in chunks_per_file.items():
+        print(f"Ingested {source}: {count} chunks")
     print(f"Done. Collection '{COLLECTION_NAME}' now has {collection.count()} chunks.")
 
 

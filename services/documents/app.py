@@ -8,12 +8,18 @@ Run:
     uvicorn services.documents.app:app --port 8001 --reload
 """
 
+import asyncio
+import json
 import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote_plus
 
+import chromadb
+import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from minio import Minio
 from pydantic import BaseModel
 from sqlalchemy import DateTime, String, Integer, select
@@ -25,7 +31,13 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 BUCKET = os.getenv("MINIO_BUCKET", "documents")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+EVENTS_KEY = os.getenv("MINIO_EVENTS_KEY", "minio:events")
+CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
 UPLOAD_URL_TTL = timedelta(hours=1)
+DOWNLOAD_URL_TTL = timedelta(minutes=15)
 
 
 class Base(DeclarativeBase):
@@ -56,15 +68,27 @@ minio_client = Minio(
 )
 
 
+redis_queue: aioredis.Redis
+chroma_collection: chromadb.Collection
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global redis_queue, chroma_collection
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    redis_queue = aioredis.from_url(REDIS_URL)
+    chroma = await asyncio.to_thread(chromadb.HttpClient, host=CHROMA_HOST, port=CHROMA_PORT)
+    chroma_collection = await asyncio.to_thread(chroma.get_or_create_collection, COLLECTION_NAME)
     yield
+    await redis_queue.aclose()
     await engine.dispose()
 
 
 app = FastAPI(title="documents-service", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 
 class CreateDocumentRequest(BaseModel):
@@ -139,3 +163,70 @@ async def get_document(doc_id: str) -> DocumentResponse:
         if row is None:
             raise HTTPException(status_code=404, detail="document not found")
         return to_response(row)
+
+
+class DownloadResponse(BaseModel):
+    download_url: str
+
+
+@app.get("/documents/{doc_id}/download", response_model=DownloadResponse)
+async def download_document(doc_id: str) -> DownloadResponse:
+    async with new_session() as session:
+        row = await session.get(DocumentRow, doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="document not found")
+
+    url = await asyncio.to_thread(
+        minio_client.presigned_get_object, BUCKET, row.object_key, expires=DOWNLOAD_URL_TTL
+    )
+    return DownloadResponse(download_url=url)
+
+
+@app.post("/documents/{doc_id}/reprocess", response_model=DocumentResponse)
+async def reprocess_document(doc_id: str) -> DocumentResponse:
+    """Re-enqueue an already-uploaded document for chunking/embedding.
+
+    Pushes a synthetic ObjectCreated event onto the same Redis list MinIO
+    publishes to, so the worker handles it identically to a fresh upload.
+    Useful after changing chunking settings, or when an event was lost.
+    """
+    async with new_session() as session:
+        row = await session.get(DocumentRow, doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        row.status = "queued"
+        row.error = None
+        row.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    event = {
+        "Records": [
+            {
+                "eventName": "s3:ObjectCreated:Reprocess",
+                # worker unquotes keys, so quote like MinIO does
+                "s3": {"bucket": {"name": BUCKET}, "object": {"key": quote_plus(row.object_key, safe="/")}},
+            }
+        ]
+    }
+    await redis_queue.rpush(EVENTS_KEY, json.dumps(event))
+    return to_response(row)
+
+
+@app.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str) -> dict:
+    """Delete a document everywhere: ChromaDB chunks, MinIO object, Postgres row."""
+    async with new_session() as session:
+        row = await session.get(DocumentRow, doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="document not found")
+
+        chunks = await asyncio.to_thread(chroma_collection.get, where={"document_id": doc_id})
+        if chunks["ids"]:
+            await asyncio.to_thread(chroma_collection.delete, ids=chunks["ids"])
+
+        await asyncio.to_thread(minio_client.remove_object, BUCKET, row.object_key)
+
+        await session.delete(row)
+        await session.commit()
+
+    return {"deleted": doc_id, "chunks_removed": len(chunks["ids"])}

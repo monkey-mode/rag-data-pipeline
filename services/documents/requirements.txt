@@ -3,3 +3,5 @@ uvicorn[standard]>=0.32
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.30
 minio>=7.2
+redis>=5.0
+chromadb>=0.5

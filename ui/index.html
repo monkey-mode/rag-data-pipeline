@@ -40,6 +40,9 @@
   }
   header h1 { font-size: 17px; margin: 0; letter-spacing: 0.2px; }
   header span { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header a { color: var(--accent); font-size: 13px; text-decoration: none; }
+  header a:hover { text-decoration: underline; }
   main {
     flex: 1;
     display: grid;
@@ -184,6 +187,8 @@
 <header>
   <h1>RAG Pipeline</h1>
   <span>upload &rarr; chunk &rarr; embed &rarr; ask</span>
+  <div class="spacer"></div>
+  <a href="backoffice.html">Backoffice &rarr;</a>
 </header>
 <main>
   <section id="docs-panel">

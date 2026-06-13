@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Backoffice</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --ink: #1f2421;
+    --muted: #6f7a72;
+    --line: #e3dfd5;
+    --accent: #1f6f54;
+    --accent-soft: #e7f2ec;
+    --amber: #b97f10;
+    --amber-soft: #fdf3df;
+    --blue: #2563ad;
+    --blue-soft: #e6eef8;
+    --red: #b3422f;
+    --red-soft: #faeae6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Avenir Next", "Seravek", "Trebuchet MS", Verdana, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: 0.2px; }
+  header span { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header a { color: var(--accent); font-size: 13px; text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 440px 1fr;
+    min-height: 0;
+  }
+
+  /* ---- documents list ---- */
+  #docs-panel {
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 18px 8px;
+  }
+  .panel-head h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--muted);
+    margin: 0;
+    flex: 1;
+  }
+  .panel-head .count { color: var(--muted); font-size: 12px; }
+  #doc-list { overflow-y: auto; flex: 1; padding: 4px 8px 16px; }
+  .doc {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .doc:hover { background: var(--bg); }
+  .doc.selected { background: var(--accent-soft); border-color: var(--accent); }
+  .doc .row1 { display: flex; align-items: center; gap: 10px; }
+  .doc .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .doc .row2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .doc .row2 .chunks { flex: 1; }
+  .doc .actions { display: flex; gap: 2px; }
+  .doc .actions button {
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 6px;
+    border-radius: 5px;
+    color: var(--muted);
+  }
+  .doc .actions button:hover { background: var(--line); color: var(--ink); }
+  .doc .actions button.danger:hover { background: var(--red-soft); color: var(--red); }
+
+  .badge {
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .badge.uploading  { background: var(--amber-soft); color: var(--amber); }
+  .badge.queued     { background: var(--amber-soft); color: var(--amber); }
+  .badge.processing { background: var(--blue-soft);  color: var(--blue); }
+  .badge.ready      { background: var(--accent-soft); color: var(--accent); }
+  .badge.failed     { background: var(--red-soft);   color: var(--red); }
+
+  /* ---- detail / chunks panel ---- */
+  #detail-panel { display: flex; flex-direction: column; min-height: 0; }
+  #detail-body { overflow-y: auto; flex: 1; padding: 18px 24px 32px; }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 40px 24px;
+    text-align: center;
+  }
+
+  .meta-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+  }
+  .meta-card h3 { margin: 0 0 4px; font-size: 16px; }
+  .meta-card .sub { color: var(--muted); font-size: 12.5px; word-break: break-all; }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 16px;
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  .meta-grid dt { color: var(--muted); }
+  .meta-grid dd { margin: 0; word-break: break-word; }
+  .meta-grid dd.err { color: var(--red); }
+
+  .chunks-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .chunks-head h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .chunk {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .chunk summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    user-select: none;
+  }
+  .chunk summary::-webkit-details-marker { display: none; }
+  .chunk summary:hover { background: var(--bg); }
+  .chunk .idx {
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 60px;
+  }
+  .chunk .preview {
+    flex: 1;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chunk .chars { color: var(--muted); font-size: 12px; }
+  .chunk .full {
+    border-top: 1px solid var(--line);
+    padding: 12px 14px;
+  }
+  .chunk .text {
+    white-space: pre-wrap;
+    font-size: 13.5px;
+    line-height: 1.55;
+    font-family: "SF Mono", "Menlo", ui-monospace, monospace;
+    background: var(--bg);
+    padding: 12px;
+    border-radius: 8px;
+    margin: 0 0 10px;
+  }
+  .chunk .kv {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .chunk .kv span {
+    font-size: 11.5px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 8px;
+    color: var(--muted);
+  }
+  .chunk .kv span b { color: var(--ink); font-weight: 600; }
+
+  button.toolbtn {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 4px 12px;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    color: var(--ink);
+  }
+  button.toolbtn:hover { background: var(--bg); }
+</style>
+</head>
+<body>
+<header>
+  <h1>RAG Backoffice</h1>
+  <span>documents &amp; chunk inspector</span>
+  <div class="spacer"></div>
+  <a href="index.html">&larr; back to chat</a>
+</header>
+<main>
+  <section id="docs-panel">
+    <div class="panel-head">
+      <h2>Documents</h2>
+      <span class="count" id="doc-count"></span>
+      <button class="toolbtn" onclick="refreshDocs()">Refresh</button>
+    </div>
+    <div id="doc-list"></div>
+  </section>
+
+  <section id="detail-panel">
+    <div id="detail-body">
+      <div class="empty">Select a document to inspect its chunks.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const DOCS_API = "http://localhost:8001";
+
+const docList = document.getElementById("doc-list");
+const docCount = document.getElementById("doc-count");
+const detailBody = document.getElementById("detail-body");
+
+let selectedId = null;
+let docsCache = [];
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function badge(status) {
+  return `<span class="badge ${esc(status)}">${esc(status)}</span>`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString();
+}
+
+/* ---------- documents list ---------- */
+
+async function refreshDocs() {
+  try {
+    const res = await fetch(`${DOCS_API}/documents`);
+    docsCache = await res.json();
+    docCount.textContent = `${docsCache.length} total`;
+    docList.innerHTML = docsCache.map((d) => `
+      <div class="doc ${d.id === selectedId ? "selected" : ""}" onclick="selectDoc('${d.id}')">
+        <div class="row1">
+          <span class="name" title="${esc(d.filename)}">${esc(d.filename)}</span>
+          ${badge(d.status)}
+        </div>
+        <div class="row2">
+          <span class="chunks">${d.chunk_count != null ? d.chunk_count + " chunks" : "no chunks yet"}</span>
+          <span class="actions" onclick="event.stopPropagation()">
+            <button title="download original" onclick="downloadDoc('${d.id}')">&#8595;</button>
+            <button title="reprocess (re-chunk + re-embed)" onclick="reprocessDoc('${d.id}')">&#8635;</button>
+            <button title="delete everywhere" class="danger" onclick="deleteDoc('${d.id}', '${esc(d.filename)}')">&#10005;</button>
+          </span>
+        </div>
+      </div>
+    `).join("");
+  } catch {
+    docList.innerHTML = `<div class="empty">documents service unreachable</div>`;
+  }
+}
+
+async function downloadDoc(id) {
+  const res = await fetch(`${DOCS_API}/documents/${id}/download`);
+  if (!res.ok) return alert(`download failed: ${res.status}`);
+  const { download_url } = await res.json();
+  window.open(download_url, "_blank");
+}
+
+async function reprocessDoc(id) {
+  const res = await fetch(`${DOCS_API}/documents/${id}/reprocess`, { method: "POST" });
+  if (!res.ok) alert(`reprocess failed: ${res.status}`);
+  refreshDocs();
+  if (id === selectedId) setTimeout(() => selectDoc(id), 400);
+}
+
+async function deleteDoc(id, filename) {
+  if (!confirm(`Delete "${filename}" everywhere (file, chunks, record)?`)) return;
+  const res = await fetch(`${DOCS_API}/documents/${id}`, { method: "DELETE" });
+  if (!res.ok) return alert(`delete failed: ${res.status}`);
+  if (id === selectedId) {
+    selectedId = null;
+    detailBody.innerHTML = `<div class="empty">Select a document to inspect its chunks.</div>`;
+  }
+  refreshDocs();
+}
+
+/* ---------- detail + chunks ---------- */
+
+async function selectDoc(id) {
+  selectedId = id;
+  refreshDocs();
+  const doc = docsCache.find((d) => d.id === id) || {};
+  detailBody.innerHTML = renderMetaCard(doc) + `<div class="empty">loading chunks&hellip;</div>`;
+
+  try {
+    const res = await fetch(`${DOCS_API}/documents/${id}/chunks`);
+    if (!res.ok) throw new Error(`chunks request failed: ${res.status}`);
+    const data = await res.json();
+    detailBody.innerHTML = renderMetaCard(doc) + renderChunks(data);
+  } catch (err) {
+    detailBody.innerHTML = renderMetaCard(doc) + `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+function renderMetaCard(doc) {
+  return `
+    <div class="meta-card">
+      <h3>${esc(doc.filename || "—")} ${badge(doc.status || "")}</h3>
+      <div class="sub">${esc(doc.id || "")}</div>
+      <dl class="meta-grid">
+        <dt>object key</dt><dd>${esc(doc.object_key || "—")}</dd>
+        <dt>chunks</dt><dd>${doc.chunk_count != null ? doc.chunk_count : "—"}</dd>
+        <dt>created</dt><dd>${fmtDate(doc.created_at)}</dd>
+        <dt>updated</dt><dd>${fmtDate(doc.updated_at)}</dd>
+        ${doc.error ? `<dt>error</dt><dd class="err">${esc(doc.error)}</dd>` : ""}
+      </dl>
+    </div>`;
+}
+
+function renderChunks(data) {
+  if (!data.chunks.length) {
+    return `<div class="empty">No chunks stored. ${
+      data.status === "ready" ? "" : "Document is not <b>ready</b> yet — reprocess or wait."
+    }</div>`;
+  }
+
+  const totalChars = data.chunks.reduce((sum, c) => sum + c.char_count, 0);
+  const items = data.chunks.map((c) => {
+    const kv = Object.entries(c.metadata)
+      .map(([k, v]) => `<span><b>${esc(k)}</b>: ${esc(v)}</span>`)
+      .join("");
+    return `
+      <details class="chunk">
+        <summary>
+          <span class="idx">#${c.chunk_index}</span>
+          <span class="preview">${esc(c.text.slice(0, 120))}</span>
+          <span class="chars">${c.char_count} chars</span>
+        </summary>
+        <div class="full">
+          <pre class="text">${esc(c.text)}</pre>
+          <div class="kv">${kv}</div>
+        </div>
+      </details>`;
+  }).join("");
+
+  return `
+    <div class="chunks-head">
+      <h4>Chunks</h4>
+      <span class="count">${data.chunks.length} chunks &middot; ${totalChars.toLocaleString()} chars total</span>
+    </div>
+    ${items}`;
+}
+
+refreshDocs();
+setInterval(() => { if (!selectedId) refreshDocs(); }, 3000);
+</script>
+</body>
+</html>

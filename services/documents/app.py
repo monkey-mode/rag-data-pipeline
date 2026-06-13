@@ -182,6 +182,68 @@ async def download_document(doc_id: str) -> DownloadResponse:
     return DownloadResponse(download_url=url)
 
 
+class ChunkDetail(BaseModel):
+    id: str
+    chunk_index: int
+    text: str
+    char_count: int
+    metadata: dict
+
+
+class ChunksResponse(BaseModel):
+    document_id: str
+    filename: str
+    status: str
+    chunk_count: int
+    chunks: list[ChunkDetail]
+
+
+@app.get("/documents/{doc_id}/chunks", response_model=ChunksResponse)
+async def get_document_chunks(doc_id: str) -> ChunksResponse:
+    """Inspect the derived chunks ChromaDB holds for a document.
+
+    Read-only view for the backoffice: returns each chunk's text and metadata,
+    ordered by chunk_index. The file in MinIO remains the source of truth; this
+    is purely the embedded/queryable projection of it.
+    """
+    async with new_session() as session:
+        row = await session.get(DocumentRow, doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="document not found")
+
+    result = await asyncio.to_thread(
+        chroma_collection.get,
+        where={"document_id": doc_id},
+        include=["documents", "metadatas"],
+    )
+
+    chunks: list[ChunkDetail] = []
+    for chunk_id, text, metadata in zip(
+        result["ids"], result["documents"], result["metadatas"]
+    ):
+        metadata = metadata or {}
+        text = text or ""
+        chunks.append(
+            ChunkDetail(
+                id=chunk_id,
+                chunk_index=metadata.get("chunk_index", 0),
+                text=text,
+                char_count=len(text),
+                # Chroma returns keys in non-deterministic order — sort for stable display.
+                metadata=dict(sorted(metadata.items())),
+            )
+        )
+    chunks.sort(key=lambda c: c.chunk_index)
+
+    return ChunksResponse(
+        document_id=doc_id,
+        filename=row.filename,
+        status=row.status,
+        chunk_count=len(chunks),
+        chunks=chunks,
+    )
+
+
 @app.post("/documents/{doc_id}/reprocess", response_model=DocumentResponse)
 async def reprocess_document(doc_id: str) -> DocumentResponse:
     """Re-enqueue an already-uploaded document for chunking/embedding.

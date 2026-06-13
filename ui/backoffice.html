@@ -237,13 +237,27 @@
     color: var(--ink);
   }
   button.toolbtn:hover { background: var(--bg); }
+  button.toolbtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ---- 3D map view ---- */
+  .graph-wrap { height: 100%; display: flex; flex-direction: column; }
+  .graph-head {
+    color: var(--muted);
+    font-size: 12.5px;
+    padding-bottom: 12px;
+    line-height: 1.5;
+  }
+  .graph-head b { color: var(--ink); }
+  #plot { flex: 1; min-height: 0; }
 </style>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
 <body>
 <header>
   <h1>RAG Backoffice</h1>
   <span>documents &amp; chunk inspector</span>
   <div class="spacer"></div>
+  <button class="toolbtn" id="map-btn" onclick="toggleGraph()">3D Vector Map</button>
   <a href="index.html">&larr; back to chat</a>
 </header>
 <main>
@@ -272,6 +286,15 @@ const detailBody = document.getElementById("detail-body");
 
 let selectedId = null;
 let docsCache = [];
+let graphMode = false;
+
+const mapBtn = document.getElementById("map-btn");
+
+// Distinct, readable colors cycled per document in the 3D scatter.
+const PALETTE = [
+  "#1f6f54", "#2563ad", "#b97f10", "#b3422f", "#7d4fa8",
+  "#0f8a8a", "#a8417e", "#5a7d1f", "#c26a2c", "#3a6ea5",
+];
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -341,6 +364,8 @@ async function deleteDoc(id, filename) {
 /* ---------- detail + chunks ---------- */
 
 async function selectDoc(id) {
+  graphMode = false;
+  mapBtn.classList.remove("active");
   selectedId = id;
   refreshDocs();
   const doc = docsCache.find((d) => d.id === id) || {};
@@ -405,8 +430,87 @@ function renderChunks(data) {
     ${items}`;
 }
 
+/* ---------- 3D vector map ---------- */
+
+function toggleGraph() {
+  if (graphMode) {
+    graphMode = false;
+    mapBtn.classList.remove("active");
+    detailBody.innerHTML = `<div class="empty">Select a document to inspect its chunks.</div>`;
+    return;
+  }
+  showGraph();
+}
+
+async function showGraph() {
+  graphMode = true;
+  selectedId = null;
+  mapBtn.classList.add("active");
+  refreshDocs();
+  detailBody.innerHTML = `<div class="empty">building 3D map&hellip;</div>`;
+
+  try {
+    const res = await fetch(`${DOCS_API}/embeddings/scatter`);
+    if (!res.ok) throw new Error(`scatter request failed: ${res.status}`);
+    const data = await res.json();
+
+    if (!data.count) {
+      detailBody.innerHTML = `<div class="empty">No embeddings yet — upload and process a document first.</div>`;
+      return;
+    }
+
+    const variancePct = Math.round(
+      data.explained_variance.reduce((a, b) => a + b, 0) * 100
+    );
+    detailBody.innerHTML = `
+      <div class="graph-wrap">
+        <div class="graph-head">
+          <b>3D Vector Map</b> — PCA of 384-d embeddings down to 3 axes.
+          <b>${data.count}</b> chunks · these axes capture <b>${variancePct}%</b>
+          of total variance. Drag to rotate; nearby points are semantically similar.
+          Toggle documents in the legend.
+        </div>
+        <div id="plot"></div>
+      </div>`;
+
+    // One Plotly trace per document so the legend toggles whole documents.
+    const byDoc = new Map();
+    for (const p of data.points) {
+      if (!byDoc.has(p.document_id)) byDoc.set(p.document_id, []);
+      byDoc.get(p.document_id).push(p);
+    }
+
+    const traces = [...byDoc.values()].map((pts, i) => ({
+      type: "scatter3d",
+      mode: "markers",
+      name: pts[0].source,
+      x: pts.map((p) => p.x),
+      y: pts.map((p) => p.y),
+      z: pts.map((p) => p.z),
+      text: pts.map((p) => `chunk ${p.chunk_index}<br>${esc(p.text)}`),
+      hovertemplate: "%{text}<extra>" + esc(pts[0].source) + "</extra>",
+      marker: { size: 4, color: PALETTE[i % PALETTE.length], opacity: 0.85 },
+    }));
+
+    const layout = {
+      margin: { l: 0, r: 0, t: 0, b: 0 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      legend: { font: { size: 11 } },
+      scene: {
+        xaxis: { title: "PC1" },
+        yaxis: { title: "PC2" },
+        zaxis: { title: "PC3" },
+      },
+    };
+
+    Plotly.newPlot("plot", traces, layout, { responsive: true, displayModeBar: true });
+  } catch (err) {
+    detailBody.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
 refreshDocs();
-setInterval(() => { if (!selectedId) refreshDocs(); }, 3000);
+setInterval(() => { if (!selectedId && !graphMode) refreshDocs(); }, 3000);
 </script>
 </body>
 </html>

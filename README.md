@@ -66,7 +66,7 @@ Key design points:
 | `services/documents/` | Async FastAPI (port 8001). Presigned upload slots, status tracking, and document management: download / reprocess / delete. Owns the `documents` table (creates it on startup). |
 | `services/rag_worker/` | Queue consumer: Redis event → fetch from MinIO → LangChain loaders (txt/md/pdf/html) → chunk → ChromaDB upsert → stamp status. |
 | `services/chats/` | FastAPI (port 8002). `POST /query` runs the LCEL RAG chain (retrieval + Claude answer); logs exchanges in its own `chats` table. Requires `ANTHROPIC_API_KEY`. |
-| `ui/` | Vanilla-JS UI (port 3000). `index.html`: drag-and-drop upload with live status badges, chat with answers + source chunks, per-document actions. `backoffice.html`: document admin + chunk inspector (per-document chunk text and metadata, download/reprocess/delete). |
+| `ui/` | Vanilla-JS UI (port 3000). `index.html`: drag-and-drop upload with live status badges, chat with answers + source chunks, per-document actions. `backoffice.html`: document admin + chunk inspector (per-document chunk text and metadata, download/reprocess/delete) + a 3D vector map (PCA of chunk embeddings, Plotly). |
 | `simple-rag/` | Earlier single-script version of the same pipeline (ingest + notebook for exploring ChromaDB). Kept for reference/learning. |
 | `docker-compose.yml` | Infrastructure only: MinIO (9000/9001), Redis (6379), Postgres (5432), ChromaDB (8000). Services run locally in the venv. |
 
@@ -80,6 +80,7 @@ Key design points:
 | GET | `/documents` | List all documents with status |
 | GET | `/documents/{id}` | Single document status |
 | GET | `/documents/{id}/chunks` | Inspect derived chunks (text + metadata) — powers the backoffice |
+| GET | `/embeddings/scatter` | All chunk embeddings reduced to 3-d (PCA) for the backoffice 3D vector map |
 | GET | `/documents/{id}/download` | Presigned GET URL for the original file |
 | POST | `/documents/{id}/reprocess` | Re-enqueue chunking/embedding via the Redis queue |
 | DELETE | `/documents/{id}` | Delete everywhere: chunks, MinIO object, DB row |

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 
 import chromadb
+import numpy as np
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -241,6 +242,89 @@ async def get_document_chunks(doc_id: str) -> ChunksResponse:
         status=row.status,
         chunk_count=len(chunks),
         chunks=chunks,
+    )
+
+
+class ScatterPoint(BaseModel):
+    x: float
+    y: float
+    z: float
+    document_id: str
+    source: str
+    chunk_index: int
+    text: str
+
+
+class ScatterResponse(BaseModel):
+    count: int
+    method: str
+    # fraction of total variance captured by each of the 3 plotted axes
+    explained_variance: list[float]
+    points: list[ScatterPoint]
+
+
+def _pca_3d(vectors: np.ndarray) -> tuple[np.ndarray, list[float]]:
+    """Project N×D embeddings onto their top 3 principal components.
+
+    Returns the N×3 coordinates and the fraction of total variance each of the
+    three axes captures. Pads to 3 columns when there are fewer than 3 usable
+    components (e.g. only one or two chunks exist).
+    """
+    centered = vectors - vectors.mean(axis=0)
+    _, singular_values, components = np.linalg.svd(centered, full_matrices=False)
+
+    k = min(3, components.shape[0])
+    coords = centered @ components[:k].T
+    if k < 3:
+        coords = np.pad(coords, ((0, 0), (0, 3 - k)))
+
+    variance = singular_values**2
+    total = float(variance.sum())
+    explained = (variance[:3] / total).tolist() if total > 0 else []
+    explained += [0.0] * (3 - len(explained))
+    return coords, explained
+
+
+@app.get("/embeddings/scatter", response_model=ScatterResponse)
+async def embeddings_scatter() -> ScatterResponse:
+    """3D projection of every stored chunk embedding, for the backoffice map.
+
+    Pulls all vectors from ChromaDB and reduces them (384-d → 3-d) with PCA so
+    the UI can render an interactive scatter. Read-only and derived: nothing is
+    written back. Chunks are colored by document client-side via document_id.
+    """
+    result = await asyncio.to_thread(
+        chroma_collection.get, include=["embeddings", "metadatas", "documents"]
+    )
+
+    embeddings = np.asarray(result["embeddings"], dtype=float)
+    if embeddings.size == 0:
+        return ScatterResponse(
+            count=0, method="pca", explained_variance=[0.0, 0.0, 0.0], points=[]
+        )
+
+    coords, explained = _pca_3d(embeddings)
+
+    points: list[ScatterPoint] = []
+    for (x, y, z), metadata, text in zip(
+        coords, result["metadatas"], result["documents"]
+    ):
+        metadata = metadata or {}
+        preview = " ".join((text or "").split())[:160]
+        points.append(
+            ScatterPoint(
+                x=float(x),
+                y=float(y),
+                z=float(z),
+                document_id=metadata.get("document_id", ""),
+                source=metadata.get("source", "?"),
+                chunk_index=metadata.get("chunk_index", 0),
+                text=preview,
+            )
+        )
+
+    return ScatterResponse(
+        count=len(points), method="pca", explained_variance=explained, points=points
     )
 
 
